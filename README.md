@@ -66,10 +66,13 @@ sudo reboot
 ## Usage
 
 ```bash
-python3 ~/camera_to_epaper.py
+python3 ~/camera_to_epaper.py           # take a photo and show it
+python3 ~/camera_to_epaper.py --clear   # only set the display to white
 ```
 
 The script takes a photo (1200×800), center-crops it to 3:2, scales it to 600×400 and sends it to the display. The display then goes into sleep mode. A refresh takes about 20 s.
+
+`--clear` sets the display to white without taking a photo. Use it before storing the camera for a longer time, so no image stays on the display.
 
 Configuration in `camera_to_epaper.py`:
 - `ROTATION = 90` – change to `-90` if the image is upside down

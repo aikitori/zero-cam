@@ -2,6 +2,7 @@
 """
 Takes a photo with the Raspberry Pi Camera Module 3 and shows it
 in landscape orientation on the Waveshare 4inch e-Paper HAT+ (E).
+With --clear the display is only set to white (no photo), e.g. before storing it.
 
 Requirements (handled by install.sh):
   - Raspberry Pi OS (Trixie), SPI enabled
@@ -9,6 +10,7 @@ Requirements (handled by install.sh):
     (other location: set the EPD_LIB environment variable to the .../python/lib folder)
 """
 
+import argparse
 import os
 import subprocess
 import sys
@@ -78,23 +80,43 @@ def prepare_image():
     return image.resize((VISUAL_WIDTH, VISUAL_HEIGHT), Image.LANCZOS)
 
 
+def open_display():
+    print("Initializing display...")
+    epd = epd4in0e.EPD()
+    epd.init()
+    return epd
+
+
+def show_photo(epd):
+    """Send the prepared photo to the display."""
+    image = prepare_image()
+
+    # Internal buffer is portrait (400x600) -> rotate the landscape image
+    if epd.width != VISUAL_WIDTH:
+        image = image.rotate(ROTATION, expand=True)
+
+    print("Sending photo to display (~20 s refresh)...")
+    epd.display(epd.getbuffer(image))
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--clear", action="store_true",
+                        help="only set the display to white (no photo), e.g. before storing it")
+    args = parser.parse_args()
+
     epd = None
     try:
-        capture_photo()
+        if not args.clear:
+            capture_photo()
 
-        print("Initializing display...")
-        epd = epd4in0e.EPD()
-        epd.init()
-
-        image = prepare_image()
-
-        # Internal buffer is portrait (400x600) -> rotate the landscape image
-        if epd.width != VISUAL_WIDTH:
-            image = image.rotate(ROTATION, expand=True)
-
-        print("Sending photo to display (~20 s refresh)...")
-        epd.display(epd.getbuffer(image))
+        epd = open_display()
+        if args.clear:
+            print("Clearing display to white (~20 s refresh)...")
+            epd.Clear()
+        else:
+            show_photo(epd)
         time.sleep(2)
         print("Done.")
 
