@@ -111,6 +111,10 @@ python3 $(find ~/4inch_e-Paper_E -name epd_4in0e_test.py)
 - [ ] Image processing for the 6-color palette (boost contrast/saturation, dithering)
 - [ ] Respect a minimum interval between refreshes (follow Waveshare's recommendation for Spectra 6)
 - [ ] Optimize boot time (`systemd-analyze blame`, disable unneeded services)
+- [ ] Simple, lightweight web server (the Pi Zero W has limited resources):
+  - browse the photos taken
+  - web control (take a photo, clear the display)
+  - send a saved photo to the e-Paper display
 
 ## License
 
