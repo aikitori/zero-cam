@@ -23,6 +23,9 @@ if [ "$EUID" -eq 0 ]; then
 fi
 
 CONFIG=/boot/firmware/config.txt
+# Swap only in compressed RAM (zram), without the backing file /var/swap on the SD card.
+# The default (zram+file) recreates /var/swap with mkswap on every boot, ~20 s on the Pi Zero W.
+SWAP_DROPIN=/etc/rpi/swap.conf.d/zero-cam.conf
 
 # Not needed by the camera:
 #   cloud-init   first-boot setup from Raspberry Pi Imager, ~30 s on every boot.
@@ -33,6 +36,7 @@ CONFIG=/boot/firmware/config.txt
 #   e2scrub_reap, rpi-eeprom-update (the Zero has no EEPROM)
 #   apt-daily, apt-daily-upgrade, man-db timers: run shortly after boot and
 #                slow down the single CPU core. Update manually with apt.
+#   swap file    see SWAP_DROPIN below
 SERVICES="bluetooth.service udisks2.service NetworkManager-wait-online.service
 e2scrub_reap.service rpi-eeprom-update.service"
 TIMERS="apt-daily.timer apt-daily-upgrade.timer man-db.timer"
@@ -55,15 +59,15 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-# Wi-Fi connection managed by NetworkManager
-WIFI_CON="$(nmcli -g GENERAL.CONNECTION device show wlan0)"
+# Wi-Fi connection managed by NetworkManager (empty after switch_to_networkd.sh)
+WIFI_CON="$(nmcli -g GENERAL.CONNECTION device show wlan0 2>/dev/null || true)"
 
 if [ "$UNDO" -eq 1 ]; then
     if [ -n "$WIFI_CON" ] && [ "$(nmcli -g ipv4.method con show "$WIFI_CON")" = "manual" ]; then
         sudo nmcli con mod "$WIFI_CON" ipv4.method auto ipv4.addresses "" ipv4.gateway "" ipv4.dns ""
         echo "Wi-Fi back to DHCP"
     fi
-    sudo rm -f /etc/cloud/cloud-init.disabled
+    sudo rm -f /etc/cloud/cloud-init.disabled "$SWAP_DROPIN"
     sudo systemctl enable $SERVICES $TIMERS
     sudo sed -i '/^# zero-cam boot$/,/^# zero-cam boot end$/d' "$CONFIG"
     echo "Undone. Reboot to apply: sudo reboot"
@@ -72,7 +76,7 @@ fi
 
 if [ "$STATIC" -eq 1 ]; then
     if [ -z "$WIFI_CON" ]; then
-        echo "ERROR: wlan0 is not connected - cannot set a static IP."
+        echo "ERROR: wlan0 is not connected via NetworkManager - cannot set a static IP."
         exit 1
     fi
     CURRENT="$(nmcli -g IP4.ADDRESS device show wlan0 | head -n 1)"
@@ -108,6 +112,14 @@ fi
 sudo systemctl disable $SERVICES $TIMERS
 echo "Disabled: $SERVICES $TIMERS" | tr '\n' ' '
 echo
+
+if [ ! -f "$SWAP_DROPIN" ]; then
+    printf '# zero-cam: swap only in RAM (zram), no /var/swap\n[Main]\nMechanism=zram\n' \
+        | sudo install -D -m 644 /dev/stdin "$SWAP_DROPIN"
+    # still open as backing device until the reboot, the space is freed then
+    sudo rm -f /var/swap
+    echo "Swap: zram only, /var/swap removed"
+fi
 
 # Firmware: no rainbow splash, no extra delay before the kernel starts
 if ! grep -q '^# zero-cam boot$' "$CONFIG"; then

@@ -184,7 +184,7 @@ Optional: a fixed IP address for Wi-Fi instead of DHCP, so the Pi does not have 
 
 Missing values are taken from the current connection; the values are checked before anything is changed, and the new address is active after the reboot. Pick an address outside the router's DHCP range (or reserve it in the router), otherwise it may be handed out twice. `--undo` switches back to DHCP. If the Pi is not reachable afterwards, the Wi-Fi settings are in `/etc/netplan/90-NM-*.yaml` on the SD card.
 
-The script disables cloud-init, Bluetooth, udisks2, `NetworkManager-wait-online`, `e2scrub_reap`, `rpi-eeprom-update` and the apt and man-db timers, and turns off the rainbow splash. Wi-Fi and the user stay configured. Automatic package list updates are off afterwards: update with `sudo apt update && sudo apt full-upgrade`.
+The script disables cloud-init, Bluetooth, udisks2, `NetworkManager-wait-online`, `e2scrub_reap`, `rpi-eeprom-update` and the apt and man-db timers, and turns off the rainbow splash. Swap stays only in compressed RAM (zram): the default also keeps a swap file `/var/swap` on the SD card and recreates it on every boot, which takes about 20 s on the Pi Zero W. Wi-Fi and the user stay configured. Automatic package list updates are off afterwards: update with `sudo apt update && sudo apt full-upgrade`.
 
 The `zero-cam` service does not wait for the network, so the button works before Wi-Fi is up.
 
