@@ -2,6 +2,8 @@
 
 A Raspberry Pi Zero W takes a photo with the Camera Module 3 and shows it in landscape orientation on a 4" color e-Paper display. A toggle switch shuts the system down cleanly.
 
+Inspired by [kaloyaan/reframe](https://github.com/kaloyaan/reframe). Since a Raspberry Pi Zero 2 is currently hard to get due to supply shortages, this version runs on the original Pi Zero W.
+
 ## Hardware
 
 | Part | Details |
