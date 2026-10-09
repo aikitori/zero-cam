@@ -2,7 +2,9 @@
 """
 Takes a photo with the Raspberry Pi Camera Module 3 and shows it
 in landscape orientation on the Waveshare 4inch e-Paper HAT+ (E).
-With --clear the display is only set to white (no photo), e.g. before storing it.
+
+Photos are kept in ~/photos. Settings: ~/zero-cam.conf (see zero-cam.conf.example).
+Between two refreshes the script waits at least 180 s (Waveshare recommendation).
 
 Requirements (handled by install.sh):
   - Raspberry Pi OS (Trixie), SPI enabled
@@ -11,126 +13,42 @@ Requirements (handled by install.sh):
 """
 
 import argparse
-import os
 import subprocess
-import sys
-import time
-from pathlib import Path
 
-# --- Locate the Waveshare library BEFORE importing it ----------------------
-def _find_epd_lib():
-    if os.environ.get("EPD_LIB"):
-        return os.environ["EPD_LIB"]
-    bases = [Path.home()]
-    if os.environ.get("SUDO_USER"):
-        bases.append(Path("/home") / os.environ["SUDO_USER"])
-    for base in bases:
-        for hit in (base / "4inch_e-Paper_E").glob("**/waveshare_epd"):
-            return str(hit.parent)
-    return None
-
-_lib = _find_epd_lib()
-if _lib:
-    sys.path.insert(0, _lib)
-
-from PIL import Image  # noqa: E402
-from waveshare_epd import epd4in0e  # noqa: E402
-
-PHOTO_PATH = Path("/tmp/photo.jpg")
-
-# Visible orientation (landscape)
-VISUAL_WIDTH = 600
-VISUAL_HEIGHT = 400
-# If the image is upside down, use -90 instead of 90
-ROTATION = 90
-
-
-def capture_photo():
-    """Take a photo (3:2, matches the 600x400 display)."""
-    print("Taking photo...")
-    subprocess.run(
-        [
-            "rpicam-still",
-            "-o", str(PHOTO_PATH),
-            "--width", "1200",
-            "--height", "800",
-            "--nopreview",
-            "-t", "1500",  # time for autofocus/exposure
-        ],
-        check=True,
-    )
-
-
-def prepare_image():
-    """Load the photo, center-crop it to 3:2 and scale it to 600x400."""
-    image = Image.open(PHOTO_PATH).convert("RGB")
-
-    target_ratio = VISUAL_WIDTH / VISUAL_HEIGHT
-    img_ratio = image.width / image.height
-
-    if img_ratio > target_ratio:
-        new_width = int(image.height * target_ratio)
-        left = (image.width - new_width) // 2
-        image = image.crop((left, 0, left + new_width, image.height))
-    else:
-        new_height = int(image.width / target_ratio)
-        top = (image.height - new_height) // 2
-        image = image.crop((0, top, image.width, top + new_height))
-
-    return image.resize((VISUAL_WIDTH, VISUAL_HEIGHT), Image.LANCZOS)
-
-
-def open_display():
-    print("Initializing display...")
-    epd = epd4in0e.EPD()
-    epd.init()
-    return epd
-
-
-def show_photo(epd):
-    """Send the prepared photo to the display."""
-    image = prepare_image()
-
-    # Internal buffer is portrait (400x600) -> rotate the landscape image
-    if epd.width != VISUAL_WIDTH:
-        image = image.rotate(ROTATION, expand=True)
-
-    print("Sending photo to display (~20 s refresh)...")
-    epd.display(epd.getbuffer(image))
+import zerocam
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--clear", action="store_true",
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument("--clear", action="store_true",
                         help="only set the display to white (no photo), e.g. before storing it")
+    action.add_argument("--show", metavar="PHOTO",
+                        help="show a saved photo (name from ~/photos or path to an image) instead of taking one")
+    parser.add_argument("--force", action="store_true",
+                        help="do not wait for the minimum interval between refreshes")
     args = parser.parse_args()
 
-    epd = None
+    config = zerocam.load_config()
+    store = zerocam.PhotoStore(config)
+    display = zerocam.Display(config)
     try:
-        if not args.clear:
-            capture_photo()
-
-        epd = open_display()
         if args.clear:
-            print("Clearing display to white (~20 s refresh)...")
-            epd.Clear()
+            display.clear(force=args.force)
         else:
-            show_photo(epd)
-        time.sleep(2)
+            name = args.show or zerocam.capture(config, store)
+            if not args.show:
+                print(f"Saved {store.original(name)}")
+            display.show(zerocam.prepare(config, store, name), force=args.force)
         print("Done.")
 
     except subprocess.CalledProcessError as e:
         print(f"Camera capture failed: {e}")
+    except (IOError, FileNotFoundError) as e:
+        print(e)
     except KeyboardInterrupt:
         print("Aborted by user.")
-    finally:
-        # Always put the display to sleep and release GPIO/5V, even on errors
-        if epd is not None:
-            try:
-                epd.sleep()
-            except Exception:
-                epd4in0e.epdconfig.module_exit(cleanup=True)
 
 
 if __name__ == "__main__":

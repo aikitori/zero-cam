@@ -1,0 +1,42 @@
+# Settings for the Pi Zero e-Paper camera.
+# Copy to ~/zero-cam.conf (install.sh does this) and remove the "#" to change a value.
+# After changes: sudo systemctl restart zero-cam
+
+[camera]
+# width = 1200
+# height = 800
+# 180 if the camera is mounted upside down
+# rotation = 0
+# time for autofocus/exposure in ms
+# timeout_ms = 1500
+
+[display]
+# 90 or -90: use -90 if the image on the display is upside down
+# rotation = 90
+# seconds between two refreshes (Waveshare recommends at least 180)
+# min_refresh_interval = 180
+
+[image]
+# 0 = ideal palette (more contrast), 1 = measured panel colors (more detail)
+# palette_blend = 0.6
+# 1.0 = unchanged
+# brightness = 1.2
+# contrast = 1.0
+# saturation = 1.2
+# percent of the darkest/brightest pixels cut off by auto contrast (0 = off)
+# autocontrast_cutoff = 1
+
+[storage]
+# photo_dir = ~/photos
+
+[triggers]
+# GPIO numbers (BCM). Leave empty to turn off.
+# Button between GPIO26 (pin 37) and GND (pin 39)
+# button_gpio = 26
+# PIR motion sensor output, e.g. GPIO16 (pin 36)
+# motion_gpio =
+# minutes between automatic photos, 0 = off
+# interval_minutes = 0
+
+[web]
+# port = 8080
