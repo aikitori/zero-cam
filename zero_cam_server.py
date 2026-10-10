@@ -17,6 +17,7 @@ light enough for the Pi Zero W.
 """
 
 import html
+import io
 import re
 import subprocess
 import threading
@@ -25,11 +26,14 @@ import traceback
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from email.parser import BytesParser
+from email.policy import default as email_policy
 from urllib.parse import parse_qs, unquote
 
 import zerocam
 
 NAME = re.compile(r"^[0-9][0-9_-]*$")
+MAX_UPLOAD = 30 * 2**20
 
 
 class Camera:
@@ -174,6 +178,8 @@ button{font-size:1em;padding:10px 16px;margin:4px 4px 4px 0;border:0;border-radi
 button.light{background:#ddd;color:#222}
 button.danger{background:#c53030}
 .settings{display:block;margin:8px 0 0}
+.upload{display:block;margin:12px 0 0}
+.upload label{display:block;margin:4px 0}
 .settings input{width:6em;font-size:1em;padding:6px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
 .card{background:#fff;border-radius:8px;overflow:hidden}
@@ -300,6 +306,8 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"Web: deleted {parts[1]}")
         elif parts == ["settings"]:
             self.save_settings()
+        elif parts == ["upload"]:
+            self.upload()
         elif parts == ["shutdown"]:
             threading.Thread(target=shutdown, args=(camera, queue), daemon=True).start()
             self.send_html(page("Shutting down", SHUTDOWN_PAGE))
@@ -308,6 +316,37 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         self.redirect("/")
+
+    def upload(self):
+        """multipart/form-data with the field "photo" and the checkbox "show"."""
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > MAX_UPLOAD:
+            while length > 0:  # drain, otherwise the browser sees a broken connection
+                length -= len(self.rfile.read(min(length, 2**16)) or b"x" * length)
+            self.app["message"] = f"Upload too large (max. {MAX_UPLOAD // 2**20} MB)."
+            return
+        body = self.rfile.read(length)
+        message = BytesParser(policy=email_policy).parsebytes(
+            b"Content-Type: " + self.headers.get("Content-Type", "").encode() + b"\r\n\r\n" + body)
+        fields = {}
+        if message.is_multipart():
+            for part in message.iter_parts():
+                name = part.get_param("name", header="content-disposition")
+                fields[name] = part.get_payload(decode=True)
+        if not fields.get("photo"):
+            self.app["message"] = "Please choose a photo to upload."
+            return
+        try:
+            name = zerocam.import_photo(self.app["store"], io.BytesIO(fields["photo"]))
+        except ValueError as e:
+            self.app["message"] = f"Upload failed: {e}"
+            return
+        print(f"Web: uploaded {name}")
+        if fields.get("show"):
+            self.app["queue"].request("show", name)
+            self.app["message"] = "Photo uploaded, it will be shown on the display."
+        else:
+            self.app["message"] = "Photo uploaded."
 
     def save_settings(self):
         length = int(self.headers.get("Content-Length") or 0)
@@ -367,6 +406,10 @@ class Handler(BaseHTTPRequestHandler):
 <form method="post" action="/capture"><button>Take photo</button></form>
 <form method="post" action="/clear"><button class="light">Clear display</button></form>
 <form method="post" action="/shutdown" onsubmit="return confirm('Shut down the camera?')"><button class="danger">Shut down</button></form>
+<form method="post" action="/upload" enctype="multipart/form-data" class="upload">
+<label>Upload a photo:<br><input type="file" name="photo" accept="image/*" required></label>
+<label><input type="checkbox" name="show" value="1" checked> show on display</label>
+<button class="light">Upload</button></form>
 <form method="post" action="/settings" class="settings">
 <label>Minimum time between display refreshes:
 <input type="number" name="min_refresh_interval" min="0" max="86400" step="1" value="{interval:.0f}"> s</label>

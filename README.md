@@ -95,6 +95,7 @@ Updating later: `git pull && ./install.sh --skip-apt` (copies the scripts and re
 - browse all photos, open the original and the dithered version as shown on the display, download originals
 - take a photo, clear the display
 - send a saved photo to the display, delete photos
+- upload photos from a phone or PC (JPEG, PNG, WebP, ...; at most 30 MB), optionally shown on the display right away; they are stored like camera photos, at most 2400 px on the long side
 - shut the Pi down (waits for a running display refresh; allowed via `/etc/sudoers.d/zero-cam`, which permits only `systemctl poweroff`)
 - set the minimum time between display refreshes (stored in `~/zero-cam-web.conf`, which overrides `~/zero-cam.conf`)
 
@@ -120,7 +121,7 @@ python3 ~/camera_to_epaper.py --force              # do not wait for the refresh
 
 1. The camera takes a photo (1200×800). It is saved in `~/photos` (`YYYY-MM-DD_HH-MM-SS.jpg`), plus a thumbnail in `~/photos/thumbs`.
 2. The photo is center-cropped to 3:2 and scaled to 600×400.
-3. Image processing for the 6-color panel: auto contrast, brightness, contrast and saturation, then Floyd-Steinberg dithering to the panel colors. The palette uses the colors measured on the real panel (idea from [pimoroni/inky](https://github.com/pimoroni/inky)): `camera_to_epaper.py --color-chart` shows one patch per color, photographed in daylight next to white paper. With the ideal colors (pure blue, green, ...) skies turned green on the panel; with the measured ones they stay blue and more detail is kept. `palette_blend` mixes between both (0 = ideal, 1 = measured). The result is saved in `~/photos/dithered`.
+3. Image processing for the 6-color panel: saturation (+20 %; brightness, contrast and an auto contrast are available in the settings but off by default, they blew out faces and, applied per color channel, shifted the colors), then Floyd-Steinberg dithering to the panel colors. The palette uses the colors measured on the real panel (idea from [pimoroni/inky](https://github.com/pimoroni/inky)): `camera_to_epaper.py --color-chart` shows one patch per color, photographed in daylight next to white paper. With the ideal colors (pure blue, green, ...) skies turned green on the panel; with the measured ones they stay blue and more detail is kept. `palette_blend` mixes between both (0 = ideal, 1 = measured). The result is saved in `~/photos/dithered`.
 4. The image is sent to the display (about 20 s), then the display goes into sleep mode.
 
 **Minimum interval:** Waveshare recommends at least 180 s between two refreshes. A photo is always taken right away; the display shows it once the interval has passed. If several requests come in meanwhile, only the newest one is shown. The command line waits as well (or use `--force`). The time of the last refresh is kept in `~/photos/.last_refresh`, so this also works across reboots.

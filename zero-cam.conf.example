@@ -30,11 +30,11 @@
 # 0 = ideal palette (more contrast), 1 = measured panel colors (more detail)
 # palette_blend = 1.0
 # 1.0 = unchanged
-# brightness = 1.2
+# brightness = 1.0
 # contrast = 1.0
 # saturation = 1.2
 # percent of the darkest/brightest pixels cut off by auto contrast (0 = off)
-# autocontrast_cutoff = 1
+# autocontrast_cutoff = 0
 
 [storage]
 # photo_dir = ~/photos

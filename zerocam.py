@@ -58,11 +58,11 @@ DEFAULTS = {
     "image": {
         # 0 = ideal palette (more contrast), 1 = measured panel colors (more detail)
         "palette_blend": "1.0",
-        "brightness": "1.2",
+        "brightness": "1.0",
         "contrast": "1.0",
         "saturation": "1.2",
         # percent of the darkest/brightest pixels cut off by auto contrast
-        "autocontrast_cutoff": "1",
+        "autocontrast_cutoff": "0",
     },
     "storage": {
         "photo_dir": str(Path.home() / "photos"),
@@ -189,6 +189,13 @@ class PhotoStore:
         for path in (self.original(name), self.thumb(name), self.preview(name)):
             path.unlink(missing_ok=True)
 
+    def make_thumb(self, name):
+        from PIL import Image, ImageOps
+        with Image.open(self.original(name)) as image:
+            thumb = ImageOps.exif_transpose(image).convert("RGB")
+            thumb.thumbnail((300, 200))
+            thumb.save(self.thumb(name), quality=80)
+
     def resolve(self, name_or_path):
         """Photo name (as listed) or path to any image file."""
         if self.original(name_or_path).exists():
@@ -273,11 +280,30 @@ def capture(config, store):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    from PIL import Image, ImageOps
-    with Image.open(path) as image:
-        thumb = ImageOps.exif_transpose(image).convert("RGB")
-        thumb.thumbnail((300, 200))
-        thumb.save(store.thumb(name), quality=80)
+    store.make_thumb(name)
+    return name
+
+
+# Uploaded photos are stored at most this large (long side), like the camera
+# photos they only need to be a bit larger than the 600x400 display
+UPLOAD_MAX_SIZE = 2400
+
+
+def import_photo(store, fileobj):
+    """Store an uploaded image (any format Pillow can read) as a new photo.
+
+    Returns the name. Raises ValueError if the file is not a readable image.
+    """
+    from PIL import Image, ImageOps, UnidentifiedImageError
+    try:
+        with Image.open(fileobj) as image:
+            image = ImageOps.exif_transpose(image).convert("RGB")
+    except (UnidentifiedImageError, OSError):
+        raise ValueError("not an image format that can be read (e.g. JPEG, PNG, WebP)")
+    image.thumbnail((UPLOAD_MAX_SIZE, UPLOAD_MAX_SIZE), Image.LANCZOS)
+    name = store.new_name()
+    image.save(store.original(name), quality=90)
+    store.make_thumb(name)
     return name
 
 
@@ -325,7 +351,8 @@ def dither(image, config):
     image = fit_landscape(image)
     cutoff = opts.getfloat("autocontrast_cutoff")
     if cutoff > 0:
-        image = ImageOps.autocontrast(image, cutoff=cutoff)
+        # preserve_tone: stretch the brightness only, per channel it shifts the colors
+        image = ImageOps.autocontrast(image, cutoff=cutoff, preserve_tone=True)
     image = ImageEnhance.Brightness(image).enhance(opts.getfloat("brightness"))
     image = ImageEnhance.Contrast(image).enhance(opts.getfloat("contrast"))
     image = ImageEnhance.Color(image).enhance(opts.getfloat("saturation"))
