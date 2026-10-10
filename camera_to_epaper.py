@@ -26,6 +26,8 @@ def main():
                         help="only set the display to white (no photo), e.g. before storing it")
     action.add_argument("--show", metavar="PHOTO",
                         help="show a saved photo (name from ~/photos or path to an image) instead of taking one")
+    action.add_argument("--color-chart", action="store_true",
+                        help="show one patch per panel color (to measure the real colors)")
     parser.add_argument("--force", action="store_true",
                         help="do not wait for the minimum interval between refreshes")
     args = parser.parse_args()
@@ -36,6 +38,8 @@ def main():
     try:
         if args.clear:
             display.clear(force=args.force)
+        elif args.color_chart:
+            display.show(zerocam.color_chart(), force=args.force)
         else:
             name = args.show or zerocam.capture(config, store)
             if not args.show:

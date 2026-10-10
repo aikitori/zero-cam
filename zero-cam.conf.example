@@ -28,7 +28,7 @@
 
 [image]
 # 0 = ideal palette (more contrast), 1 = measured panel colors (more detail)
-# palette_blend = 0.6
+# palette_blend = 1.0
 # 1.0 = unchanged
 # brightness = 1.2
 # contrast = 1.0

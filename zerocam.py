@@ -57,7 +57,7 @@ DEFAULTS = {
     },
     "image": {
         # 0 = ideal palette (more contrast), 1 = measured panel colors (more detail)
-        "palette_blend": "0.6",
+        "palette_blend": "1.0",
         "brightness": "1.2",
         "contrast": "1.0",
         "saturation": "1.2",
@@ -119,6 +119,36 @@ def _epd_module():
         sys.path.insert(0, lib)
     from waveshare_epd import epd4in0e
     return epd4in0e
+
+
+def _release_epd_module(epd4in0e):
+    """The Waveshare library claims the GPIO pins when it is imported and keeps
+    them until the process ends, so a second process (web service + command
+    line) could not use the display any more. Release the pins and forget the
+    module, the next refresh imports it fresh."""
+    impl = epd4in0e.epdconfig.implementation
+    numbers = []
+    for name in ("GPIO_RST_PIN", "GPIO_DC_PIN", "GPIO_PWR_PIN", "GPIO_BUSY_PIN"):
+        try:
+            device = getattr(impl, name)
+            numbers.append(device.pin.info.name)
+            device.close()
+        except Exception:
+            pass
+    # gpiozero's close() only resets a pin to input, the lgpio claim stays until
+    # the process ends. Free the display pins explicitly (gpiozero internals).
+    try:
+        import lgpio
+        from gpiozero import Device
+        factory = Device.pin_factory
+        for info, pin in list(factory.pins.items()):
+            if info.name in numbers:
+                lgpio.gpio_free(factory._handle, pin._number)
+                del factory.pins[info]
+    except Exception as e:
+        print(f"Could not free the display pins: {e}")
+    for module in [m for m in sys.modules if m.startswith("waveshare_epd")]:
+        del sys.modules[module]
 
 
 # --- Photo storage -----------------------------------------------------------
@@ -253,16 +283,18 @@ def capture(config, store):
 
 # --- Image processing --------------------------------------------------------
 # Panel color indices as expected by the controller (4 = unused).
-# Ideal and measured colors after pimoroni/inky (MIT): the measured ones
-# look closer to the real panel, so dithering with them keeps more detail.
+# Measured: the color chart (camera_to_epaper.py --color-chart) photographed
+# in daylight next to white paper, white-balanced on the paper and scaled so
+# that the panel white is 255. Dithering with the real colors keeps skies blue
+# (with the ideal colors they turned green) and keeps more detail.
 PANEL_COLORS = [
     # index, ideal, measured
-    (0, (0, 0, 0), (57, 48, 57)),           # black
+    (0, (0, 0, 0), (48, 37, 52)),           # black
     (1, (255, 255, 255), (255, 255, 255)),  # white
-    (2, (255, 255, 0), (208, 190, 71)),     # yellow
-    (3, (255, 0, 0), (156, 72, 75)),        # red
-    (5, (0, 0, 255), (61, 59, 94)),         # blue
-    (6, (0, 255, 0), (58, 91, 70)),         # green
+    (2, (255, 255, 0), (240, 206, 48)),     # yellow
+    (3, (255, 0, 0), (129, 41, 41)),        # red
+    (5, (0, 0, 255), (87, 89, 152)),        # blue
+    (6, (0, 255, 0), (65, 111, 86)),        # green
 ]
 
 
@@ -299,6 +331,23 @@ def dither(image, config):
     image = ImageEnhance.Color(image).enhance(opts.getfloat("saturation"))
     return image.quantize(palette=_palette(opts.getfloat("palette_blend")),
                           dither=Image.Dither.FLOYDSTEINBERG)
+
+
+def color_chart():
+    """Test image: one patch per panel color, labelled. To photograph the real
+    panel colors (in daylight) and calibrate the palette."""
+    from PIL import Image, ImageDraw
+    names = ["black", "white", "yellow", "red", "blue", "green"]
+    chart = Image.new("P", (VISUAL_WIDTH, VISUAL_HEIGHT), 1)
+    chart.putpalette(_palette(0).getpalette())
+    draw = ImageDraw.Draw(chart)
+    w, h = VISUAL_WIDTH // 3, VISUAL_HEIGHT // 2
+    for i, name in enumerate(names):
+        x, y = (i % 3) * w, (i // 3) * h
+        draw.rectangle([x + 4, y + 4, x + w - 5, y + h - 5], fill=i)
+        # label in black on light patches, in white on dark ones
+        draw.text((x + 12, y + 12), name, fill=0 if name in ("white", "yellow") else 1)
+    return chart
 
 
 def save_preview(dithered, path, config):
@@ -350,19 +399,22 @@ class Display:
                 print(f"Waiting {wait:.0f} s (minimum interval between refreshes)...")
                 time.sleep(wait)
             epd4in0e = _epd_module()
-            epd = epd4in0e.EPD()
-            print("Initializing display...")
-            if epd.init() != 0:
-                raise IOError("Display initialization failed")
             try:
-                yield epd
-                self.stamp.write_text(str(time.time()))
-            finally:
-                # Always put the display to sleep and release GPIO/5V, even on errors
+                epd = epd4in0e.EPD()
+                print("Initializing display...")
+                if epd.init() != 0:
+                    raise IOError("Display initialization failed")
                 try:
-                    epd.sleep()
-                except Exception:
-                    epd4in0e.epdconfig.module_exit(cleanup=True)
+                    yield epd
+                    self.stamp.write_text(str(time.time()))
+                finally:
+                    # Always put the display to sleep and switch off 5V, even on errors
+                    try:
+                        epd.sleep()
+                    except Exception:
+                        epd4in0e.epdconfig.module_exit()
+            finally:
+                _release_epd_module(epd4in0e)
 
     def show(self, dithered, force=False):
         buffer = panel_buffer(dithered, self.rotation)
