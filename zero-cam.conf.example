@@ -9,6 +9,9 @@
 # rotation = 0
 # time for autofocus/exposure in ms
 # timeout_ms = 1500
+# Lens shading correction of the camera software. On the Pi Zero W it paints
+# pink/green horizontal bands into the photos, so it is off by default.
+# lens_shading = off
 
 [display]
 # 90 or -90: use -90 if the image on the display is upside down

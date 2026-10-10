@@ -8,6 +8,8 @@ Used by camera_to_epaper.py (command line) and zero_cam_server.py
 
 import configparser
 import fcntl
+import json
+import re
 import os
 import subprocess
 import sys
@@ -16,7 +18,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from PIL import Image, ImageEnhance, ImageOps
+# Pillow is imported inside the functions: it takes seconds to load on the
+# Pi Zero W, and the web server sets up the button before it is needed.
 
 # Visible orientation of the display (landscape)
 VISUAL_WIDTH = 600
@@ -34,6 +37,9 @@ DEFAULTS = {
         "rotation": "0",
         # time for autofocus/exposure in ms
         "timeout_ms": "1500",
+        # Lens shading correction of the camera software. On the Pi Zero W it
+        # paints pink/green bands into the photos, so it is off by default.
+        "lens_shading": "off",
     },
     "display": {
         # If the image on the display is upside down, use -90 instead of 90
@@ -155,26 +161,75 @@ class PhotoStore:
         raise FileNotFoundError(f"Photo not found: {name_or_path}")
 
 
+CACHE_DIR = Path.home() / ".cache" / "zero-cam"
+
+
+def _sensor_model():
+    """Camera model as libcamera names its tuning file, e.g. imx708 or imx708_wide (cached)."""
+    cache = CACHE_DIR / "sensor"
+    try:
+        return cache.read_text().strip()
+    except OSError:
+        pass
+    out = subprocess.run(["rpicam-hello", "--list-cameras"], capture_output=True, text=True).stdout
+    match = re.search(r"^\s*0 : (\S+)", out, re.M)
+    if not match:
+        return None
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache.write_text(match.group(1))
+    return match.group(1)
+
+
+def tuning_without_lens_shading():
+    """Copy of the system tuning file without rpi.alsc; rebuilt when the system file changes.
+
+    Returns None if the tuning file cannot be found (then the default is used).
+    """
+    model = _sensor_model()
+    if not model:
+        return None
+    # Pi 5 uses the PiSP image processor, all older models the VC4 one
+    compatible = Path("/proc/device-tree/compatible").read_bytes()
+    platform = "pisp" if b"bcm2712" in compatible else "vc4"
+    source = Path("/usr/share/libcamera/ipa/rpi") / platform / f"{model}.json"
+    target = CACHE_DIR / f"{model}_no_lens_shading.json"
+    if not source.exists():
+        return None
+    if not target.exists() or target.stat().st_mtime < source.stat().st_mtime:
+        # tuning files may contain // comments
+        tuning = json.loads(re.sub(r"(?m)^\s*//.*$", "", source.read_text()))
+        tuning["algorithms"] = [a for a in tuning["algorithms"] if "rpi.alsc" not in a]
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(tuning, indent=1))
+    return target
+
+
 def capture(config, store):
     """Take a photo, save original + thumbnail and return its name."""
     cam = config["camera"]
     name = store.new_name()
     path = store.original(name)
+    command = [
+        "rpicam-still",
+        "-o", str(path),
+        "--width", cam["width"],
+        "--height", cam["height"],
+        "--rotation", cam["rotation"],
+        "--nopreview",
+        "-t", cam["timeout_ms"],
+    ]
+    if not cam.getboolean("lens_shading"):
+        tuning = tuning_without_lens_shading()
+        if tuning:
+            command += ["--tuning-file", str(tuning)]
     print("Taking photo...")
     subprocess.run(
-        [
-            "rpicam-still",
-            "-o", str(path),
-            "--width", cam["width"],
-            "--height", cam["height"],
-            "--rotation", cam["rotation"],
-            "--nopreview",
-            "-t", cam["timeout_ms"],
-        ],
+        command,
         check=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    from PIL import Image, ImageOps
     with Image.open(path) as image:
         thumb = ImageOps.exif_transpose(image).convert("RGB")
         thumb.thumbnail((300, 200))
@@ -201,6 +256,7 @@ def _palette(blend):
     colors = []
     for _, ideal, measured in PANEL_COLORS:
         colors += [round(i * (1 - blend) + m * blend) for i, m in zip(ideal, measured)]
+    from PIL import Image
     palette = Image.new("P", (1, 1))
     palette.putpalette(colors + [0, 0, 0] * (256 - len(PANEL_COLORS)))
     return palette
@@ -208,6 +264,7 @@ def _palette(blend):
 
 def fit_landscape(image):
     """Center-crop to 3:2 and scale to 600x400."""
+    from PIL import Image, ImageOps
     image = ImageOps.exif_transpose(image).convert("RGB")
     return ImageOps.fit(image, (VISUAL_WIDTH, VISUAL_HEIGHT), Image.LANCZOS)
 
@@ -217,6 +274,7 @@ def dither(image, config):
 
     Returns a palette image (600x400) whose indices are positions in PANEL_COLORS.
     """
+    from PIL import Image, ImageEnhance, ImageOps
     opts = config["image"]
     image = fit_landscape(image)
     cutoff = opts.getfloat("autocontrast_cutoff")
@@ -310,6 +368,7 @@ def prepare(config, store, name_or_path):
     For stored photos the dithered preview is saved for the web interface.
     """
     path = store.resolve(name_or_path)
+    from PIL import Image
     with Image.open(path) as image:
         dithered = dither(image, config)
     if path.parent == store.root:

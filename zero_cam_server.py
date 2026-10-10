@@ -194,6 +194,24 @@ def page(title, body, refresh=False):
 <main>{body}</main></body></html>"""
 
 
+SHUTDOWN_PAGE = """<div class="status"><strong>Shutting down...</strong><br>
+A running display refresh is finished first. Disconnect the power only once
+the green LED is off.</div>"""
+
+
+def shutdown(camera, queue):
+    """Power off once the camera and the display are idle (cutting power during a
+    refresh can leave the e-paper in a bad state). Waiting requests are dropped."""
+    print("Web: shutdown requested")
+    with queue.cond:
+        queue.pending = None
+    deadline = time.time() + 120
+    while (camera.busy() or queue.current is not None) and time.time() < deadline:
+        time.sleep(1)
+    # allowed without password by /etc/sudoers.d/zero-cam (install.sh)
+    subprocess.run(["sudo", "-n", "systemctl", "poweroff"])
+
+
 def delete_button(name):
     return (f'<form method="post" action="/delete/{name}" '
             f'onsubmit="return confirm(\'Delete photo {label(name)}?\')">'
@@ -282,6 +300,10 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"Web: deleted {parts[1]}")
         elif parts == ["settings"]:
             self.save_settings()
+        elif parts == ["shutdown"]:
+            threading.Thread(target=shutdown, args=(camera, queue), daemon=True).start()
+            self.send_html(page("Shutting down", SHUTDOWN_PAGE))
+            return
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -344,6 +366,7 @@ class Handler(BaseHTTPRequestHandler):
         body = f"""<div class="status">{status}</div>
 <form method="post" action="/capture"><button>Take photo</button></form>
 <form method="post" action="/clear"><button class="light">Clear display</button></form>
+<form method="post" action="/shutdown" onsubmit="return confirm('Shut down the camera?')"><button class="danger">Shut down</button></form>
 <form method="post" action="/settings" class="settings">
 <label>Minimum time between display refreshes:
 <input type="number" name="min_refresh_interval" min="0" max="86400" step="1" value="{interval:.0f}"> s</label>

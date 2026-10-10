@@ -87,6 +87,8 @@ After=local-fs.target
 User=$USER
 WorkingDirectory=$HOME
 Environment=PYTHONUNBUFFERED=1
+# higher priority: during boot the single CPU core is busy, the button should be ready early
+Nice=-10
 ExecStart=/usr/bin/python3 $HOME/zero_cam_server.py
 Restart=on-failure
 RestartSec=5
@@ -94,6 +96,13 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# The web interface may shut the Pi down (and nothing else as root)
+echo "$USER ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff" > /tmp/zero-cam.sudoers
+if sudo visudo -cf /tmp/zero-cam.sudoers > /dev/null; then
+    sudo install -m 440 -o root -g root /tmp/zero-cam.sudoers /etc/sudoers.d/zero-cam
+fi
+rm -f /tmp/zero-cam.sudoers
 
 sudo systemctl daemon-reload
 sudo systemctl enable switch-shutdown zero-cam

@@ -95,6 +95,7 @@ Updating later: `git pull && ./install.sh --skip-apt` (copies the scripts and re
 - browse all photos, open the original and the dithered version as shown on the display, download originals
 - take a photo, clear the display
 - send a saved photo to the display, delete photos
+- shut the Pi down (waits for a running display refresh; allowed via `/etc/sudoers.d/zero-cam`, which permits only `systemctl poweroff`)
 - set the minimum time between display refreshes (stored in `~/zero-cam-web.conf`, which overrides `~/zero-cam.conf`)
 
 The web interface has no login. Only use it in a trusted network.
@@ -162,6 +163,7 @@ python3 $(find ~/4inch_e-Paper_E -name epd_4in0e_test.py)
 - **The Waveshare library is not in the GitHub repo `waveshare/e-Paper`.** `epd4in0e.py` is missing there. It has to be downloaded as a separate ZIP from the Waveshare wiki. Write the `+` in the URL as `%2B` and put the URL in quotes.
 - **The ZIP already contains a `4inch_e-Paper_E` folder.** Using `unzip -d` therefore creates a double nesting. The script finds the path automatically.
 - **Display orientation:** The internal buffer is portrait (400×600), so the landscape image is rotated before output.
+- **Pink/green horizontal bands in the photos (Pi Zero W):** they are not in the raw sensor data but come from the lens shading correction (`rpi.alsc`) of the camera software; the calibration tables themselves are smooth. `zerocam.py` therefore takes photos with a copy of the tuning file without `rpi.alsc` (in `~/.cache/zero-cam/`, rebuilt when the system file changes). The edges get slightly darker, which is hardly visible on the display. Switch back with `[camera] lens_shading = on`.
 - **Waveshare's `getbuffer()` dithers again.** It quantizes to its own pure palette, which would destroy an image dithered with other colors. `zerocam.py` therefore builds the panel buffer itself.
 - **Toggle switch:** The shutdown only triggers when the switch is flipped to "off". If the switch is already "off" at boot, flip it on and back off once.
 - **Residual current after shutdown:** Even when shut down, the Pi still draws some current. To cut power completely, also disconnect the 5 V supply, but only once the green LED is off.
@@ -171,9 +173,27 @@ python3 $(find ~/4inch_e-Paper_E -name epd_4in0e_test.py)
 On a fresh Raspberry Pi OS the Pi Zero W needs about 2:35 min until everything is started (`systemd-analyze`). The biggest parts are cloud-init (about 30 s on every boot, only needed for the first setup) and NetworkManager (about 70 s).
 
 ```bash
-~/optimize_boot.sh      # run without sudo, then: sudo reboot
+~/optimize_boot.sh                  # run without sudo, then: sudo reboot
+~/optimize_boot.sh --no-initramfs   # additionally boot without initramfs (recommended, see below)
 ~/optimize_boot.sh --undo
 ```
+
+Measured on the Pi Zero W (`systemd-analyze`, the firmware time before the kernel is not included):
+
+| Step | Boot time | Wi-Fi up |
+|---|---|---|
+| Fresh Raspberry Pi OS | 2:35 min | ~2:15 min |
+| cloud-init and unneeded services off | 2:14 min | ~2:15 min |
+| `switch_to_networkd.sh` | 1:41 min | ~58 s |
+| swap only in zram | 1:04 min | ~44 s |
+| firmware/kernel settings, more services off | 42 s | ~38 s |
+| `--no-initramfs` | 36 s | ~32 s |
+
+`--no-initramfs` also shortens the time before the kernel starts, because the firmware no longer loads the 10 MB initramfs from the SD card. The script only allows it if the kernel can mount the root file system by itself (ext4 on the SD card, no modules needed). If the Pi does not start any more, put the SD card into a PC and remove the `# zero-cam boot` block at the end of `config.txt` on the boot partition.
+
+`--no-kms` (no HDMI graphics driver) was tested as well: the camera still works, but the boot is not faster, and an HDMI screen no longer shows a console. Not recommended.
+
+What remains: the SD card itself (about 14 s until the root partition is ready; a fast A1/A2 card can help) and the general slowness of the single-core CPU.
 
 Optional: a fixed IP address for Wi-Fi instead of DHCP, so the Pi does not have to wait for a lease after connecting:
 
@@ -184,7 +204,7 @@ Optional: a fixed IP address for Wi-Fi instead of DHCP, so the Pi does not have 
 
 Missing values are taken from the current connection; the values are checked before anything is changed, and the new address is active after the reboot. Pick an address outside the router's DHCP range (or reserve it in the router), otherwise it may be handed out twice. `--undo` switches back to DHCP. If the Pi is not reachable afterwards, the Wi-Fi settings are in `/etc/netplan/90-NM-*.yaml` on the SD card.
 
-The script disables cloud-init, Bluetooth, udisks2, `NetworkManager-wait-online`, `e2scrub_reap`, `rpi-eeprom-update` and the apt and man-db timers, and turns off the rainbow splash. Swap stays only in compressed RAM (zram): the default also keeps a swap file `/var/swap` on the SD card and recreates it on every boot, which takes about 20 s on the Pi Zero W. Wi-Fi and the user stay configured. Automatic package list updates are off afterwards: update with `sudo apt update && sudo apt full-upgrade`.
+The script disables cloud-init, Bluetooth (service and drivers), udisks2, `NetworkManager-wait-online`, `e2scrub_reap`, `rpi-eeprom-update`, `keyboard-setup`, `console-setup`, `sshswitch`, `systemd-network-generator`, sound, and the apt and man-db timers. It turns off the rainbow splash, lets the CPU run at full clock for the first 60 s (`initial_turbo`, no overclocking), makes the kernel quiet and skips the file system check of the boot partition. Swap stays only in compressed RAM (zram): the default also keeps a swap file `/var/swap` on the SD card and recreates it on every boot, which takes about 20 s on the Pi Zero W. Wi-Fi and the user stay configured. Automatic package list updates are off afterwards: update with `sudo apt update && sudo apt full-upgrade`.
 
 The `zero-cam` service does not wait for the network, so the button works before Wi-Fi is up.
 
