@@ -12,6 +12,13 @@
 # Lens shading correction of the camera software. On the Pi Zero W it paints
 # pink/green horizontal bands into the photos, so it is off by default.
 # lens_shading = off
+# Sensor HDR (Camera Module 3): more detail in backlit scenes like a bright sky
+# over a dark garden
+# hdr = on
+# Sensor mode without HDR: 2304:1296 is the full field of view
+# mode = 2304:1296
+# Exposure compensation, e.g. 0.5 = brighter (no effect with HDR)
+# ev = 0
 
 [display]
 # 90 or -90: use -90 if the image on the display is upside down

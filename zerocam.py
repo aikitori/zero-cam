@@ -40,6 +40,14 @@ DEFAULTS = {
         # Lens shading correction of the camera software. On the Pi Zero W it
         # paints pink/green bands into the photos, so it is off by default.
         "lens_shading": "off",
+        # Sensor HDR of the Camera Module 3: much more detail in backlit scenes
+        # (bright sky, dark garden). Off: --mode keeps the full field of view.
+        "hdr": "on",
+        # Sensor mode without HDR. 2304:1296 is the full sensor area (binned);
+        # otherwise rpicam picks a cropped mode for small photos.
+        "mode": "2304:1296",
+        # exposure compensation, e.g. 0.5 = brighter (has no effect with HDR)
+        "ev": "0",
     },
     "display": {
         # If the image on the display is upside down, use -90 instead of 90
@@ -218,6 +226,12 @@ def capture(config, store):
         "--nopreview",
         "-t", cam["timeout_ms"],
     ]
+    if cam.getboolean("hdr"):
+        command += ["--hdr", "sensor"]
+    elif cam["mode"]:
+        command += ["--mode", cam["mode"]]
+    if cam.getfloat("ev"):
+        command += ["--ev", cam["ev"]]
     if not cam.getboolean("lens_shading"):
         tuning = tuning_without_lens_shading()
         if tuning:
